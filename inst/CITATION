@@ -1,0 +1,15 @@
+note <- sprintf("R package version %s", meta$Version);
+
+bibentry(
+	bibtype = "Article",
+	title = "Bayesian inference for latent biologic structure with determinantal point processes",
+	author = c(person("Xu", "Yanxun"), person('M\\"uller', "Peter"), person("Telesca", "Donatello")),
+	year = 2016,
+	journal = "Biometrics",
+	volume = 72,
+	number = 3,
+	pages = "955--964",
+	note = note,
+	doi = "10.1111/biom.12482",
+	url = "https://bitbucket.org/djhshih/dppmix"
+)
