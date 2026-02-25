@@ -1,12 +1,12 @@
-b9dc2e70fed565837c12549b28549937 *DESCRIPTION
+1ab594bca5d922efc09b22d542243cc2 *DESCRIPTION
 6322194d66827ed8314abdc45cf0f73a *NAMESPACE
 6e9cbe7ac225121494e73795a1cf4400 *R/covariance.R
 0559ea351953db536455b096437521b2 *R/distribs.R
 6e9cbe7ac225121494e73795a1cf4400 *R/dppcore/R/covariance.R
 0559ea351953db536455b096437521b2 *R/dppcore/R/distribs.R
 55b2e11cfe2b99e00345ac7643ae4f20 *R/dppcore/R/methods.R
-759aea3e172c888cf96b834b03de9df7 *R/dppmix_mvnorm.R
-e9bb221c123bcff363c0ea8488fcf4bf *R/estimate.R
+54a4af98743d3f2790614bb1bf24db92 *R/dppmix_mvnorm.R
+66e3e3da54a2079370d7a4274b2987c4 *R/estimate.R
 55b2e11cfe2b99e00345ac7643ae4f20 *R/methods.R
 85c7277f785b608418d73d1aa4314e58 *R/simulate.R
 df6fd5d134c6e74faf4a644f49f3ba5b *README.md

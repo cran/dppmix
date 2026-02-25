@@ -84,7 +84,7 @@ dppmix_mvnorm <- function(X, hparams=NULL, store=NULL, control=NULL, fixed=NULL,
     a0 = 2,
     b0 = 2,
     delta = 1,
-    sigma_pro_mu = 0.2,
+    sigma_pro_mu = 0.4,
     theta = 5
   );
 
@@ -257,7 +257,7 @@ dppmix_mvnorm_update_z <- function(K, mu, w, lambda, Sigma, X, E) {
   ds <- matrix(
     unlist(lapply(ks,
       function(k) {
-        w[k] * mvtnorm::dmvnorm(X, mu[k, ], Sigma[,  , k])
+        w[k] * likelihood(X, mu[k, ], Sigma[,  , k])
       }
     )),
     nrow = nrow(X)
@@ -298,7 +298,7 @@ dppmix_mvnorm_update_Sigma <- function(lambda, K, E) {
   J <- nrow(E);
   Sigma <- array(0, c(J, J, K));
   for (k in 1:K) {
-    Sigma[, , k] <- E %*% diag(lambda[k, ]) %*% t(E);
+    Sigma[, , k] <- E %*% diag(lambda[k, ], ncol=J, nrow=J) %*% t(E);
   }
 
   Sigma
@@ -396,7 +396,12 @@ dppmix_mvnorm_update_mu <- function(K, z, mu, lambda, Sigma, X, hparams) {
   S.pro <- hparams$sigma_pro_mu^2 * diag(J);
 
   # covariance matrix for DPP
+  # NB If a pair of mu elements are too close,
+  #    then C would be computationally singular and non-invertible!
   C <- cov_matrix_rows(mu, hparams);
+
+	# repeat until we get a valid mu
+  repeat {
 
   if (K == 1) {
 
@@ -461,6 +466,12 @@ dppmix_mvnorm_update_mu <- function(K, z, mu, lambda, Sigma, X, hparams) {
 
   }  # if (K == 1)
 
+	if (mu_is_valid(mu, hparams)) {
+		break;
+  }
+
+  } # repeat
+
   mu
 }
 
@@ -472,7 +483,7 @@ dppmix_mvnorm_llikelihood_v1 <- function(X, z, mu, Sigma) {
   ll <- 0;
   for (i in 1:length(z)) {
     zi <- z[i];
-    ll <- ll + mvtnorm::dmvnorm(X[i,], mu[zi,], Sigma[,,zi], log=TRUE);
+    ll <- ll + likelihood(X[i,], mu[zi,], Sigma[,,zi], log=TRUE);
   }
 
   sum(ll)
@@ -483,7 +494,7 @@ dppmix_mvnorm_llikelihood_v2 <- function(X, z, mu, Sigma) {
   K <- nrow(mu);
   sum(unlist(lapply(1:K,
     function(k) {
-      mvtnorm::dmvnorm(X[z == k,], mu[k,], Sigma[,,k], log=TRUE)
+      likelihood(X[z == k,], mu[k,], Sigma[,,k], log=TRUE)
     }
   )))
 }
@@ -499,33 +510,46 @@ dppmix_mvnorm_split_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams) 
   ll.old <- dppmix_mvnorm_llikelihood(X, z, mu, Sigma);
 
   K.new <- K + 1;
+  k1 <- K.new - 1;
+  k2 <- K.new;
+
+	# repeat until we get a valid mu
+	repeat {
 
   # randomly determine the terms of the divorce settlement
   alpha <- rbeta(1, 1, 1);  # E[alpha] = 0.5
   beta <- rbeta(J, 1, 1);   # E[beta_d] = 0.5
-  # NB the random sign of r is not described in Xu, Mueller, Telesca 2015
-  r <- rbeta(J, 2, 2) * sample(c(-1, 1), J, replace=TRUE);
 
   # choose a component to split with uniform probability
   k <- sample(1:K, 1);
   k.idx <- which(z == k);
   mk <- length(k.idx);
 
-  k1 <- K.new - 1;
-  k2 <- K.new;
-
-  # w_1^{new} = w_1 \alpha
-  # w_2^{new} = w_1 (1 - \alpha)
-  w1 <- w[k] * alpha;
-  w2 <- w[k] * (1 - alpha);
+  # NB the random sign of r is not described in Xu, Mueller, Telesca 2015
+  r <- rbeta(J, 2, 2) * sample(c(-1, 1), J, replace=TRUE);
 
   # \mu_1^{new} = \mu - sqrt(w_2^{new} / w_1^{new}) \sum_d k_{1d}^{1/2} r_d e_d
   # \mu_2^{new} = \mu + sqrt(w_1^{new} / w_2^{new}) \sum_d k_{1d}^{1/2} r_d e_d
   # ensure that lambda[k,] remains a 1 x J row vector
   # dd will be a 1 x J row vector
-  dd <- (sqrt(lambda[k,,drop=FALSE]) * r) %*% E;
+  dd <- (sqrt(lambda[k, , drop=FALSE]) * r) %*% E;
   mu1 <- mu[k,] - sqrt( (1-alpha)/alpha ) * dd;
   mu2 <- mu[k,] + sqrt( alpha/(1-alpha) ) * dd;
+
+  mu.new <- rbind(mu[-k, , drop=FALSE], mu1, mu2);
+
+	if (mu_is_valid(mu.new, hparams)) {
+		break;
+	}
+
+	} # repeat
+
+	# update other variables
+
+  # w_1^{new} = w_1 \alpha
+  # w_2^{new} = w_1 (1 - \alpha)
+  w1 <- w[k] * alpha;
+  w2 <- w[k] * (1 - alpha);
 
   # \lambda_{1d}^{new} = \beta_d * (1 - r_d^2) * w_1 / w_1^{new} k_{1d}
   # \lambda_{2d}^{new} = (1 - \beta_d) * (1 - r_d^2) * w_1 / w_1^{new} k_{2d}
@@ -534,15 +558,14 @@ dppmix_mvnorm_split_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams) 
 
   # delete split component and append new components
   w.new <- c(w[-k], w1, w2);
-  mu.new <- rbind(mu[-k, , drop=FALSE], mu1, mu2);
-  lambda.new = rbind(lambda[-k,], lambda1, lambda2);
+  lambda.new = rbind(lambda[-k, , drop=FALSE], lambda1, lambda2);
   Sigma.new <- dppmix_mvnorm_update_Sigma(lambda.new, K.new, E);
   C.new <- cov_matrix_rows(mu.new, hparams);
 
   # allocate data points in split component into new components
   # based on complete conditional posterior
-  p1 <- w1 * mvtnorm::dmvnorm(X[k.idx,], mu1, Sigma.new[,,k1]);
-  p2 <- w2 * mvtnorm::dmvnorm(X[k.idx,], mu2, Sigma.new[,,k2]);
+  p1 <- w1 * likelihood(X[k.idx,], mu1, Sigma.new[,,k1]);
+  p2 <- w2 * likelihood(X[k.idx,], mu2, Sigma.new[,,k2]);
   # probability of assigning data point to first new component
   prob <- ifelse(p1 + p2 > 0, p1 / (p1 + p2), 0);
 
@@ -577,9 +600,9 @@ dppmix_mvnorm_split_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams) 
     # log p(w)
     ( (delta - 1 + mk) * log(w[k]) + lbeta(delta, K * delta) ) +
     # log p(\tilde{\mu})
-    log(det(C.new)) - 
+    ldet(C.new) - 
     # log p(\mu)
-    log(det(C.old)) + 
+    ldet(C.old) + 
     # log p(\tilde{\lambda}) - log p(\lambda)
     -J * lgamma(a) +
     sum(
@@ -647,10 +670,10 @@ dppmix_mvnorm_combine_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams
     alpha*(1-alpha)*(mu[k1,]-mu[k2,])^2;
 
   # These probabilities were not mentioend in Xu, Mueller, Telesca 2015
-  p11 <- w[k1] * mvtnorm::dmvnorm(X[idx1,], mu[k1,], Sigma[,,k1]);
-  p12 <- w[k2] * mvtnorm::dmvnorm(X[idx1,], mu[k2,], Sigma[,,k2]);
-  p21 <- w[k1] * mvtnorm::dmvnorm(X[idx2,], mu[k1,], Sigma[,,k1]);
-  p22 <- w[k2] * mvtnorm::dmvnorm(X[idx2,], mu[k2,], Sigma[,,k2]);
+  p11 <- w[k1] * likelihood(X[idx1,], mu[k1,], Sigma[,,k1]);
+  p12 <- w[k2] * likelihood(X[idx1,], mu[k2,], Sigma[,,k2]);
+  p21 <- w[k1] * likelihood(X[idx2,], mu[k1,], Sigma[,,k1]);
+  p22 <- w[k2] * likelihood(X[idx2,], mu[k2,], Sigma[,,k2]);
   prob1 <- ifelse(p11 + p12 > 0, p11 / (p11 + p12), 0);
   prob2 <- ifelse(p21 + p22 > 0, p22 / (p21 + p22), 0);
 
@@ -664,7 +687,7 @@ dppmix_mvnorm_combine_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams
   # delete selected components and append combined component at the end
   w.new <- c(w[-kk], wc);
   mu.new <- rbind(mu[-kk, , drop=FALSE], muc);
-  lambda.new <- rbind(lambda[-kk,], lambdac);
+  lambda.new <- rbind(lambda[-kk, , drop=FALSE], lambdac);
   Sigma.new <- dppmix_mvnorm_update_Sigma(lambda.new, K.new, E);
   C.new <- cov_matrix_rows(mu.new, hparams);
 
@@ -701,9 +724,9 @@ dppmix_mvnorm_combine_move <- function(K, z, mu, w, lambda, Sigma, X, E, hparams
     # log p(w)
     ( (delta - 1 + n1)*log(w[k1]) + (delta - 1 + n2)*log(w[k2]) ) +
     # log p(\tilde{\mu})
-    log(det(C.new)) - 
+    ldet(C.new) - 
     # log p(\mu)
-    log(det(C.old)) +
+    ldet(C.old) +
     # log p(\tilde{\lambda}) - log p(\lambda)
     -J * lgamma(a) +
     sum(
@@ -762,3 +785,27 @@ dppmix_mvnorm_update_K <- function(K, z, mu, w, lambda, Sigma, X, E, hparams) {
   list(K=K, z=z, mu=mu, w=w, lambda=lambda, Sigma=Sigma)
 }
 
+likelihood <- function(X, mu, Sigma, log=FALSE) {
+  if (length(mu) > 1) {
+    mvtnorm::dmvnorm(X, mu, Sigma, log=log)
+  } else {
+    dnorm(X, mu, Sigma, log=log)
+  }
+}
+
+ldet <- function(x) {
+  as.numeric(determinant(x)$modulus)
+}
+
+# check that no pair of values are mu are too close, causing C to be singular
+mu_is_valid <- function(mu, hparams) {
+  # check if covariance matrix is invertible
+  C <- cov_matrix_rows(mu, hparams);
+  if (inherits(try(solve(C)), "try-error")) {
+		message("mu = ")
+		print(as.numeric(mu))
+		FALSE
+	} else {
+		TRUE
+	}
+}

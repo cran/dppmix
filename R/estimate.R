@@ -1,12 +1,16 @@
 #' @export
-estimate.dppmix_mcmc <- function(object, pars, ...) {
+estimate.dppmix_mcmc <- function(object, pars=NULL, ...) {
   i <- which_min_error(object);
 
   if (missing(pars)) {
     pars <- c("z", "K");
   }
 
-  object[[i]][pars]
+	if (is.null(pars)) {
+		object[[i]]
+	} else {
+		object[[i]][pars]
+	}
 }
 
 # Find mcmc sample that minimizes error
@@ -15,6 +19,7 @@ which_min_error <- function(mcmc) {
   N <- length(mcmc[[1]]$z);
 
   Hmatrix <- matrix(0, N, N);
+	# FIXME this tmp is too large!
   tmp <- array(0, c(N, N, m));
   for (i in 1:m) {
     tmp1 <- mcmc[[i]]$z %*% t(mcmc[[i]]$z);
